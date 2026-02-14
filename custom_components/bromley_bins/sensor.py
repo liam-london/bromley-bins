@@ -84,10 +84,21 @@ class BromleyBinSensor(SensorEntity):
     def __init__(self, coordinator, bin_type):
         self.coordinator = coordinator
         self._bin_type = bin_type
+        # Setting attributes to match the original plugin style
         self._attr_name = f"Bromley {bin_type}"
         self._attr_unique_id = f"bromley_bins_{bin_type.lower().replace(' ', '_')}"
         self._attr_icon = "mdi:trash-can"
 
     @property
     def state(self):
+        """Return the date string."""
         return self.coordinator.data.get(self._bin_type)
+
+    @property
+    def extra_state_attributes(self):
+        """Expose attributes like the old plugin did."""
+        return {
+            "bin_type": self._bin_type,
+            "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "council": "Bromley"
+        }
