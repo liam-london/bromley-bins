@@ -54,7 +54,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         soup = BeautifulSoup(html, "html.parser")
         grids = soup.find_all("div", class_="waste-service-grid")
         
-        results = {}
+        # Store results AND the current timestamp
+        results = {
+            "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
         for grid in grids:
             name_tag = grid.find("h3", class_="waste-service-name")
             if not name_tag: continue
@@ -78,13 +82,13 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     )
 
     await coordinator.async_config_entry_first_refresh()
-    async_add_entities([BromleyBinSensor(coordinator, b) for b in coordinator.data])
+    # Filter out 'last_check' when creating entities
+    async_add_entities([BromleyBinSensor(coordinator, b) for b in coordinator.data if b != "last_check"])
 
 class BromleyBinSensor(SensorEntity):
     def __init__(self, coordinator, bin_type):
         self.coordinator = coordinator
         self._bin_type = bin_type
-        # Setting attributes to match the original plugin style
         self._attr_name = f"Bromley {bin_type}"
         self._attr_unique_id = f"bromley_bins_{bin_type.lower().replace(' ', '_')}"
         self._attr_icon = "mdi:trash-can"
@@ -96,9 +100,9 @@ class BromleyBinSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        """Expose attributes like the old plugin did."""
+        """Expose attributes including the stored timestamp."""
         return {
             "bin_type": self._bin_type,
-            "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_check": self.coordinator.data.get("last_check"),
             "council": "Bromley"
         }
