@@ -2,8 +2,8 @@
   "domain": "bromley_bins",
   "name": "Bromley Bins",
   "config_flow": true,
-  "documentation": "https://github.com/yourusername/bromley_bins",
+  "documentation": "https://github.com/liam-london/bromley_bins",
   "requirements": ["beautifulsoup4==4.12.3", "selenium==4.14.0"],
-  "version": "2026.2.3",
+  "version": "2026.2.10",
   "iot_class": "cloud_polling"
 }
