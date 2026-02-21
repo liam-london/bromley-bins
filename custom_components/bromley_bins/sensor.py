@@ -7,7 +7,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed, CoordinatorEntity
 
 from .const import DOMAIN, CONF_URL, CONF_SELENIUM_URL
 
@@ -26,8 +26,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         options.add_argument('--disable-blink-features=AutomationControlled')
         
         def get_data():
+            driver = None
             try:
                 driver = webdriver.Remote(command_executor=sel_url, options=options)
+                # Prevents the script from hanging forever if the council site is slow
+                driver.set_page_load_timeout(30)
                 driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 driver.get(url)
                 
@@ -47,33 +50,39 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 driver.quit()
                 return html
             except Exception as e:
-                if 'driver' in locals(): driver.quit()
+                if driver: 
+                    driver.quit()
                 raise e
 
-        html = await hass.async_add_executor_job(get_data)
-        soup = BeautifulSoup(html, "html.parser")
-        grids = soup.find_all("div", class_="waste-service-grid")
-        
-        # Store results AND the current timestamp
-        results = {
-            "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
-        for grid in grids:
-            name_tag = grid.find("h3", class_="waste-service-name")
-            if not name_tag: continue
-            name = name_tag.get_text(strip=True)
+        try:
+            html = await hass.async_add_executor_job(get_data)
+            soup = BeautifulSoup(html, "html.parser")
+            grids = soup.find_all("div", class_="waste-service-grid")
             
-            date_val = None
-            rows = grid.find_all("div", class_="govuk-summary-list__row")
-            for row in rows:
-                key = row.find("dt")
-                if key and "Next collection" in key.get_text():
-                    date_val = row.find("dd").get_text(strip=True)
-                    break
-            if date_val:
-                results[name] = date_val
-        return results
+            # Record the timestamp of this successful update
+            results = {
+                "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            for grid in grids:
+                name_tag = grid.find("h3", class_="waste-service-name")
+                if not name_tag: continue
+                name = name_tag.get_text(strip=True)
+                
+                date_val = None
+                rows = grid.find_all("div", class_="govuk-summary-list__row")
+                for row in rows:
+                    key = row.find("dt")
+                    if key and "Next collection" in key.get_text():
+                        date_val = row.find("dd").get_text(strip=True)
+                        break
+                if date_val:
+                    results[name] = date_val
+            
+            return results
+        except Exception as e:
+            _LOGGER.error("Error updating Bromley Bins data: %s", e)
+            raise UpdateFailed(f"Error communicating with Selenium: {e}")
 
     coordinator = DataUpdateCoordinator(
         hass, _LOGGER, name="Bromley Bins",
@@ -81,13 +90,21 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         update_interval=timedelta(hours=12),
     )
 
+    # First refresh
     await coordinator.async_config_entry_first_refresh()
-    # Filter out 'last_check' when creating entities
-    async_add_entities([BromleyBinSensor(coordinator, b) for b in coordinator.data if b != "last_check"])
+    
+    # Add entities, filtering out the internal 'last_check' metadata key
+    async_add_entities([
+        BromleyBinSensor(coordinator, b) 
+        for b in coordinator.data if b != "last_check"
+    ])
 
-class BromleyBinSensor(SensorEntity):
+class BromleyBinSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a Bromley Bin Sensor linked to the Coordinator."""
+
     def __init__(self, coordinator, bin_type):
-        self.coordinator = coordinator
+        """Pass coordinator to CoordinatorEntity."""
+        super().__init__(coordinator)
         self._bin_type = bin_type
         self._attr_name = f"Bromley {bin_type}"
         self._attr_unique_id = f"bromley_bins_{bin_type.lower().replace(' ', '_')}"
@@ -95,12 +112,12 @@ class BromleyBinSensor(SensorEntity):
 
     @property
     def state(self):
-        """Return the date string."""
+        """Return the state from the coordinator data."""
         return self.coordinator.data.get(self._bin_type)
 
     @property
     def extra_state_attributes(self):
-        """Expose attributes including the stored timestamp."""
+        """Return the state attributes."""
         return {
             "bin_type": self._bin_type,
             "last_check": self.coordinator.data.get("last_check"),
