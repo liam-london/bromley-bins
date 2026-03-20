@@ -47,13 +47,15 @@ def _parse_collection_date(text: str, now: date) -> date | None:
     # Remove common prefixes (some councils include extra words)
     t = re.sub(r"^(next\s+collection\s*:?)\s*", "", t, flags=re.I)
 
+    # NEW: strip trailing status text like "(In progress)"
+    t = re.sub(r"\s*\([^)]*\)\s*$", "", t)
+
     # NEW: Normalize punctuation and ordinal suffixes
     # "Friday, 27th February" -> "Friday 27 February"
     t = t.replace(",", " ")
     t = re.sub(r"\b(\d{1,2})(st|nd|rd|th)\b", r"\1", t, flags=re.I)
     t = " ".join(t.split())
 
-    # Try a set of known formats (includes abbreviated weekday/month)
     formats = [
         "%A %d %B %Y",
         "%A %d %B",
@@ -72,18 +74,14 @@ def _parse_collection_date(text: str, now: date) -> date | None:
         try:
             dt = datetime.strptime(t, fmt)
             d = dt.date()
-            # If the source omits the year, datetime defaults to 1900.
             if "%Y" not in fmt:
                 d = d.replace(year=now.year)
-                # If it looks like the date already passed (e.g., in Dec scraping Jan),
-                # roll forward one year.
                 if d < now - timedelta(days=7):
                     d = d.replace(year=now.year + 1)
             return d
         except ValueError:
             continue
 
-    # Try to extract a date-like token from the string (last resort)
     m = re.search(r"(\d{4}-\d{2}-\d{2})", t)
     if m:
         try:
